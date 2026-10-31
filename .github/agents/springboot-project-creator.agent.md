@@ -160,18 +160,52 @@ Do not create a feature branch for this workflow.
 
 After the initial commit succeeds, check whether a remote named `origin` is configured.
 
-# STEP 9: Create the GitHub repository and push to master
+# STEP 9: Create the GitHub repository and push to master using a Git token
 
 Every newly created project must be pushed to GitHub for the first time on `master`.
 Before pushing, obtain the user's explicit approval if it has not already been provided
 for this project-creation request. Never push credentials or secrets.
+
+Use a user-provided GitHub personal access token (PAT), not the user's existing
+GitHub CLI authentication. Never ask the user to paste the token into chat. The
+fixed token-file location is `C:\Users\<username>\auth.txt`; the user must create
+this file and store the PAT using the `GITHUB_TOKEN=<Value>` format. Before any
+GitHub operation, read the token from that file into the current process
+environment:
+
+PowerShell:
+
+```powershell
+$tokenPath = Join-Path $env:USERPROFILE "auth.txt"
+$tokenLine = (Get-Content -LiteralPath $tokenPath -Raw).Trim()
+if ($tokenLine -notmatch '^GITHUB_TOKEN\s*=\s*(\S+)$') {
+    throw "auth.txt must contain exactly GITHUB_TOKEN=<Value>."
+}
+$env:GITHUB_TOKEN = $Matches[1]
+$env:GH_TOKEN = $env:GITHUB_TOKEN
+```
+
+Do not create, overwrite, or move `auth.txt`; fail explicitly if it does not
+exist, is empty, contains more than one line, or does not use the exact
+`GITHUB_TOKEN=<Value>` key format. Do not print the token or the contents of
+`auth.txt`. The token must not be committed, embedded in a remote URL, included
+in command arguments or output, or copied into the project. For a fine-grained
+PAT, use repository administration permission when creating a repository and
+contents read/write permission when pushing. If the repository already exists,
+contents read/write permission is sufficient.
 
 If `origin` is already configured:
 
 1. Verify that it points to the intended repository.
 2. Do not change or overwrite the remote.
 3. Rename the local branch to `master` if necessary.
-4. Push the committed code:
+4. Configure a temporary `GIT_ASKPASS` helper outside the project that reads
+   `GITHUB_TOKEN` only when Git requests credentials. Set `GIT_TERMINAL_PROMPT=0`,
+   push over HTTPS, then remove the helper and clear all token-related
+   environment variables.
+   The helper must return `x-access-token` as the username and the value of
+   `GITHUB_TOKEN` as the password.
+5. Push the committed code:
 
 ```bash
 git branch -M master
@@ -183,9 +217,12 @@ append `/<project-name>`, and use that as the repository name. For example:
 
 `https://github.com/<user-pace>` + `customer-management` becomes `<user-pace>/customer-management`.
 
-After the user explicitly approves the first push:
+After the user explicitly approves the first push and the token has been loaded
+from `C:\Users\<username>\auth.txt`:
 
-1. Verify GitHub authentication with `gh auth status`.
+1. Verify token authentication with `GH_TOKEN` (for example, `gh api user`).
+   Do not run `gh auth login`, `gh auth status`, or read credentials from the
+   GitHub CLI keychain.
 2. Check whether the target repository already exists:
 
 ```bash
@@ -201,6 +238,7 @@ gh repo create <owner>/<project-name> --private --source . --remote origin
 git push -u origin master
 ```
 
+Use the same temporary `GIT_ASKPASS` setup for the final `git push`.
 Use `--public` only when the user explicitly requests a public repository. Never overwrite an existing remote repository; if the repository already exists, stop and report the conflict.
 Do not create a pull request automatically.
 
@@ -237,11 +275,15 @@ Then display:
 - Do not require a long user prompt.
 - Use Customer CRUD APIs as the default implementation.
 - Create the project in the exact user-provided location.
-- For every new project, create a private GitHub repository from the user's profile URL and project name and perform the first push to `master` after explicit approval.
+- For every new project, create a private GitHub repository from the user's profile URL and project name and perform the first push to `master` after explicit approval using the token stored at `C:\Users\<username>\auth.txt`.
 - Always use the `master` branch for pushed code in this workflow.
 - Never create a feature branch unless the user explicitly asks for one.
 - Push to `origin/master` only after the user explicitly approves the first push and the initial commit succeeds.
 - Never infer a GitHub username; obtain the user's profile URL and append the project name.
+- Never use `gh auth login`, `gh auth status`, the GitHub CLI keychain, or an existing GitHub CLI login for authentication.
+- Always use `C:\Users\<username>\auth.txt` as the token source; it must contain exactly `GITHUB_TOKEN=<Value>`. Never ask for a different token-file location.
+- Never put a token in a Git remote URL, command argument, project file, shell history, logs, or chat messages.
+- Clear token-related environment variables and delete the temporary `GIT_ASKPASS` helper after Git operations finish, including after a failed push.
 - Never overwrite an existing repository or remote.
 - Verify the final remote, branch, working-tree status, and pushed commit hash before reporting success.
 - Never create a PR unless the commit succeeded, the user explicitly approves, and GitHub remote is available.
